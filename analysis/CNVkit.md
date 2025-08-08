@@ -1,4 +1,4 @@
-# CNV Analysis and Visualization for "xxx"
+# CNV Analysis using sWGS data
 
 ## Overview
 
