@@ -1,78 +1,79 @@
-# CNV Analysis using scDNA sequencing data
+# CNV Analysis Using Single-Cell DNA Sequencing Data
 
 ## Overview
 
-This section documents the CNV calling and visualization process using [CopyKit](https://github.com/navinlabcode/copykit?tab=readme-ov-file).  
-All analyses are based on BAM files generated in the pre-processing step. Visualizations and downstream analyses were performed using CopyKit’s built-in tools or homemade R scripts.
+This repository demonstrates the workflow for calling and visualizing copy number variations (CNVs) from single-cell DNA sequencing data using [CopyKit](https://github.com/navinlabcode/copykit).  
+All analyses are based on BAM files generated from pre-processed single-cell data. CNV calling, quality control, clustering, and phylogenetic inference were performed using CopyKit’s built-in functions, along with additional custom R scripts.
+
+> 💡 **Note:** Some custom functions (e.g., `filter_cells_by_sds`) used in this pipeline will be packaged into a standalone R package in the future.
 
 ---
+## Notes
+- This pipeline assumes that the input BAM files are already deduplicated and indexed.
+- You can adjust resolution, QC thresholds (SDS ≤ 1, correlation ≥ 0.8), or clustering resolution based on dataset characteristics.
+- More details on custom functions and SDS-based QC are provided in the `scripts/` directory.
 
-## Analysis
 
- ***(Later I'll package all the R functions)***
- 
-```R
-library("copykit")
+## Analysis Pipeline
 
-# Pre-processing
+```r
+library(copykit)
+
+# 1. Pre-processing
 tumor <- runVarbin("~/path/to/scDNA/bam/files/", 
                    remove_Y = TRUE,
                    genome = "hg38",
-                   resolution = "220kb"
-                   is_paired_end = TRUE)
-# Quality control
-# add basic quality control information to colData
-tumor <- runMetrics(tumor)
+                   resolution = "220kb",
+                   is_paired_end = TRUE,
+                   method="multipcf")
 
-# detect euploid cells
-tumor <- findAneuploidCells(tumor)
-tumor <- tumor[,colData(tumor)$is_aneuploid == TRUE]
+# 2. Quality control
+tumor <- runMetrics(tumor)  # Add basic QC metrics
+tumor <- findAneuploidCells(tumor)  # Identify euploid vs. aneuploid
+tumor <- tumor[, colData(tumor)$is_aneuploid == TRUE]
 
-# annotates low-quality cells according to a defined resolution threshold and SDS score.
-tumor <- findOutliers(tumor,k=5,resolution=0.8)
-tumor <- filter_cells_by_sds(tumor)
-tumor <- tumor[,colData(tumor)$outlier== FALSE]
+# 3. Outlier filtering (custom + built-in)
+tumor <- findOutliers(tumor, k = 5, resolution = 0.8)
+tumor <- filter_cells_by_sds(tumor)  # Custom function for SDS-based QC
+tumor <- tumor[, colData(tumor)$outlier == FALSE]
 
-# KNN smoothing
+# 4. KNN smoothing
 tumor <- knnSmooth(tumor)
 
-# scquantum & calcInteger
-tumor <- calcInteger(tumor, method = 'scquantum', assay = 'smoothed_bincounts')
+# 5. Integer copy number inference
+tumor <- calcInteger(tumor, method = "scquantum", assay = "smoothed_bincounts")
 
-# clustering
+# 6. Clustering
 tumor <- runUmap(tumor)
 tumor <- findSuggestedK(tumor)
 tumor <- findClusters(tumor)
-tumor <- tumor[,colData(tumor)$subclones != 'c0']
+tumor <- tumor[, colData(tumor)$subclones != "c0"]  # Remove unclustered
 
-# phylogenetic analysis
-tumor <- runPhylo(tumor, metric = 'manhattan')
+# 7. Phylogenetic tree construction
+tumor <- runPhylo(tumor, metric = "manhattan")
 
-# calcConsensus
+# 8. Consensus profile generation
 tumor <- calcConsensus(tumor)
 ```
 
 ## Visulization
-
-```R
-# add sample/visit information
+```r
+# Add metadata
 colData(tumor)$Visit <- stringr::str_extract(colData(tumor)$sample, "(V0|V2)")
 colData(tumor)$Info <- stringr::str_extract(colData(tumor)$sample, "\\d{4}_(V0|V2)")
 colData(tumor)$Patient <- stringr::str_extract(colData(tumor)$sample, "\\d{4}")
 
-# Umap
-plotUmap(tumor, label = 'subclones')
-plotUmap(tumor, label = 'Visit')
+# UMAP plots
+plotUmap(tumor, label = "subclones")
+plotUmap(tumor, label = "Visit")
 
-# Heatmap
-# comparison between high/low quality cells
-plotHeatmap(tumor, label = 'outlier', row_split ='outlier'
+# Heatmap: outlier comparison
+plotHeatmap(tumor, label = "outlier", row_split = "outlier")
 
-# consensus heatmap for each individual
-# here you need to extract samples from the tumor first
-patient <- tumor[,colData(tumor)$sample=='
-plotHeatmap(tumor,consensus = TRUE,assay = 'integer',label = 'subclones',group = 'stage')
+# Heatmap: per-individual consensus profile
+P1 <- tumor[, colData(tumor)$sample == "P1"]
+plotHeatmap(P1, consensus = TRUE, assay = "integer", label = "subclones", group = "stage")
 
-#
-
+# Heatmap: full cohort
+plotHeatmap(tumor, label = c("Patient", "Visit"), group = "Patient")
 ```
